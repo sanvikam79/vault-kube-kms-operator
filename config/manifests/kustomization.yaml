@@ -1,0 +1,3 @@
+resources:
+- bases/vault-kms-plugin-openshift-provider.clusterserviceversion.yaml
+- ../default
