@@ -77,36 +77,59 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-# TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
-# The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
-# kubectl kuberc is disabled by default for test isolation; enable with:
-# - KUBECTL_KUBERC=true
-# CertManager is installed by default; skip with:
-# - CERT_MANAGER_INSTALL_SKIP=true
 KIND_CLUSTER ?= vault-kms-plugin-openshift-provider-test-e2e
+E2E_NAMESPACE ?= openshift-kms-plugin-provider
+E2E_REGISTRY ?= localhost:5001
+E2E_IMG ?= $(E2E_REGISTRY)/vault-kms-plugin-openshift-provider:v$(VERSION)
+E2E_BUNDLE_IMG ?= $(E2E_REGISTRY)/vault-kms-plugin-openshift-provider-bundle:v$(VERSION)
 
 .PHONY: setup-test-e2e
-setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
+setup-test-e2e: ## Set up a Kind cluster with local registry and OLM for e2e tests
 	@command -v $(KIND) >/dev/null 2>&1 || { \
 		echo "Kind is not installed. Please install Kind manually."; \
+		exit 1; \
+	}
+	@command -v operator-sdk >/dev/null 2>&1 || { \
+		echo "operator-sdk is not installed. Please install operator-sdk manually."; \
 		exit 1; \
 	}
 	@case "$$($(KIND) get clusters)" in \
 		*"$(KIND_CLUSTER)"*) \
 			echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation." ;; \
 		*) \
+			echo "Starting local registry..."; \
+			$(CONTAINER_TOOL) inspect kind-registry >/dev/null 2>&1 || \
+				$(CONTAINER_TOOL) run -d --restart=always -p 5001:5000 --name kind-registry registry:2; \
 			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
-			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
+			$(KIND) create cluster --name $(KIND_CLUSTER) --config=hack/kind-config.yaml; \
+			$(CONTAINER_TOOL) network connect kind kind-registry 2>/dev/null || true; \
+			echo "Installing OLM..."; \
+			operator-sdk olm install; \
+			;; \
 	esac
 
+.PHONY: deploy-test-e2e
+deploy-test-e2e: manifests generate fmt vet ## Build images, push to local registry, and install via OLM
+	$(MAKE) docker-build IMG=$(E2E_IMG)
+	$(CONTAINER_TOOL) push --tls-verify=false $(E2E_IMG)
+	$(MAKE) bundle IMG=$(E2E_IMG)
+	$(MAKE) bundle-build BUNDLE_IMG=$(E2E_BUNDLE_IMG)
+	$(CONTAINER_TOOL) push --tls-verify=false $(E2E_BUNDLE_IMG)
+	kubectl create namespace $(E2E_NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
+	operator-sdk run bundle $(E2E_BUNDLE_IMG) --namespace $(E2E_NAMESPACE) --use-http --timeout 5m
+
 .PHONY: test-e2e
-test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
-	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v
-	$(MAKE) cleanup-test-e2e
+test-e2e: setup-test-e2e deploy-test-e2e ## Run e2e tests: create cluster, install via OLM, run tests, clean up.
+	go test -tags=e2e ./test/e2e/ -v -ginkgo.v -e2e.namespace=$(E2E_NAMESPACE); \
+	ret=$$?; \
+	$(MAKE) cleanup-test-e2e; \
+	exit $$ret
 
 .PHONY: cleanup-test-e2e
-cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
-	@$(KIND) delete cluster --name $(KIND_CLUSTER)
+cleanup-test-e2e: ## Tear down the Kind cluster and local registry used for e2e tests
+	@operator-sdk cleanup vault-kms-plugin-openshift-provider --namespace $(E2E_NAMESPACE) 2>/dev/null || true
+	@$(KIND) delete cluster --name $(KIND_CLUSTER) 2>/dev/null || true
+	@$(CONTAINER_TOOL) rm -f kind-registry 2>/dev/null || true
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter

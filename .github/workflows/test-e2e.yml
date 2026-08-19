@@ -6,6 +6,12 @@ on:
 
 permissions: {}
 
+env:
+  IMG: localhost:5001/vault-kms-plugin-openshift-provider:v0.0.1
+  BUNDLE_IMG: localhost:5001/vault-kms-plugin-openshift-provider-bundle:v0.0.1
+  KIND_CLUSTER: vault-kms-plugin-openshift-provider-test-e2e
+  OPERATOR_NAMESPACE: openshift-kms-plugin-provider
+
 jobs:
   test-e2e:
     permissions:
@@ -23,16 +29,87 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install the latest version of kind
+      - name: Install kind
         run: |
           curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-$(go env GOARCH)
           chmod +x ./kind
           sudo mv ./kind /usr/local/bin/kind
 
-      - name: Verify kind installation
-        run: kind version
-
-      - name: Running Test e2e
+      - name: Install operator-sdk
         run: |
-          go mod tidy
-          make test-e2e
+          ARCH=$(go env GOARCH)
+          OS=$(go env GOOS)
+          curl -sSLo ./operator-sdk https://github.com/operator-framework/operator-sdk/releases/download/v1.42.3/operator-sdk_${OS}_${ARCH}
+          chmod +x ./operator-sdk
+          sudo mv ./operator-sdk /usr/local/bin/operator-sdk
+
+      - name: Create kind cluster with local registry
+        run: |
+          # Start a local registry
+          docker run -d --restart=always -p 5001:5000 --network bridge --name kind-registry registry:2
+
+          # Create kind cluster
+          cat <<EOF | kind create cluster --name $KIND_CLUSTER --config=-
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          containerdConfigPatches:
+          - |-
+            [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5001"]
+              endpoint = ["http://kind-registry:5000"]
+          EOF
+
+          # Connect the registry to the kind network
+          docker network connect kind kind-registry || true
+
+          # Document the local registry
+          kubectl apply -f - <<EOF
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: local-registry-hosting
+            namespace: kube-public
+          data:
+            localRegistryHosting.v1: |
+              host: "localhost:5001"
+              help: "https://kind.sigs.k8s.io/docs/user/local-registry/"
+          EOF
+
+      - name: Install OLM
+        run: operator-sdk olm install
+
+      - name: Build and push images
+        run: |
+          make docker-build IMG=$IMG
+          docker push $IMG
+          make bundle IMG=$IMG
+          make bundle-build BUNDLE_IMG=$BUNDLE_IMG
+          docker push $BUNDLE_IMG
+
+      - name: Install operator via OLM
+        run: |
+          kubectl create namespace $OPERATOR_NAMESPACE
+          operator-sdk run bundle $BUNDLE_IMG --namespace $OPERATOR_NAMESPACE --timeout 5m
+
+      - name: Run e2e tests
+        run: |
+          go test -tags=e2e ./test/e2e/ -v -ginkgo.v \
+            -e2e.namespace=$OPERATOR_NAMESPACE
+
+      - name: Collect debug info on failure
+        if: failure()
+        run: |
+          echo "=== Pods ==="
+          kubectl get pods -n $OPERATOR_NAMESPACE
+          echo "=== CSV ==="
+          kubectl get csv -n $OPERATOR_NAMESPACE
+          echo "=== Operator Logs ==="
+          kubectl logs -n $OPERATOR_NAMESPACE -l control-plane=controller-manager --tail=100 || true
+          echo "=== Events ==="
+          kubectl get events -n $OPERATOR_NAMESPACE --sort-by=.lastTimestamp || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          operator-sdk cleanup vault-kms-plugin-openshift-provider --namespace $OPERATOR_NAMESPACE || true
+          kind delete cluster --name $KIND_CLUSTER || true
+          docker rm -f kind-registry || true
