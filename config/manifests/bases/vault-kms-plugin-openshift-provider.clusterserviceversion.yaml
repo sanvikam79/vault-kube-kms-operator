@@ -1,33 +1,89 @@
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: BUSL-1.1
+
 apiVersion: operators.coreos.com/v1alpha1
 kind: ClusterServiceVersion
 metadata:
   annotations:
     alm-examples: '[]'
-    capabilities: Basic Install
-  name: vault-kms-plugin-openshift-provider.v0.0.1
+    capabilities: Seamless Upgrades
+    categories: Security
+    containerImage: registry.connect.redhat.com/hashicorp/vault-kms-plugin-openshift-provider
+    description: OLM operator that publishes the Vault KMS plugin image reference
+      for OpenShift encryption controllers.
+    features.operators.openshift.io/cnf: "false"
+    features.operators.openshift.io/cni: "false"
+    features.operators.openshift.io/csi: "false"
+    features.operators.openshift.io/disconnected: "true"
+    features.operators.openshift.io/fips-compliant: "true"
+    features.operators.openshift.io/proxy-aware: "false"
+    features.operators.openshift.io/tls-profiles: "false"
+    features.operators.openshift.io/token-auth-aws: "false"
+    features.operators.openshift.io/token-auth-azure: "false"
+    features.operators.openshift.io/token-auth-gcp: "false"
+    repository: https://github.com/hashicorp/vault-kms-plugin-openshift-provider
+    support: HashiCorp
+  labels:
+    operatorframework.io/arch.amd64: supported
+    operatorframework.io/arch.arm64: supported
+    operatorframework.io/arch.s390x: supported
+    operatorframework.io/os.linux: supported
+  name: vault-kms-plugin-openshift-provider.v0.0.0-dev
   namespace: placeholder
 spec:
   apiservicedefinitions: {}
   customresourcedefinitions: {}
-  description: Operator to define KMS plugin configuration for OpenShift clusters.
+  description: |-
+    The Vault KMS Plugin OpenShift Provider operator manages the lifecycle of the
+    HashiCorp Vault KMS plugin image reference for OpenShift encryption controllers.
+
+    ## Overview
+
+    This operator creates and enforces a well-known ConfigMap in the
+    `openshift-kms-plugin-provider` namespace. Red Hat's
+    `cluster-kube-apiserver-operator` reads this ConfigMap to inject the Vault KMS
+    plugin as a sidecar container on every master node, enabling etcd encryption
+    via HashiCorp Vault's Transit engine.
+
+    The operator has a 1:1 relationship between operator version and plugin version —
+    each release bakes a specific digest-pinned plugin image reference into the
+    operator binary at compile time.
+
+    See the documentation for more info [here](https://github.com/hashicorp/vault-kms-plugin-openshift-provider).
   displayName: Vault KMS Plugin OpenShift Provider
   icon:
-  - base64data: ""
-    mediatype: ""
+  - base64data: PHN2ZyBpZD0iTE9HT1MiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmlld0JveD0iMCAwIDE4MCAyNTgiPjxwYXRoIGQ9Ik02Mi4xNSwxOTguMTdoNi43Nkw1OC42NCwyMzIuNTZINDlMMzguNzYsMTk4LjE3aDYuNzZsOC4zMiwyOC42NloiLz48L3N2Zz4=
+    mediatype: image/svg+xml
   install:
     spec:
-      deployments: []
-    strategy: deployment
+      deployments: null
+    strategy: ""
   installModes:
-  - supported: true
-    type: OwnNamespace
   - supported: false
+    type: OwnNamespace
+  - supported: true
     type: SingleNamespace
   - supported: false
     type: MultiNamespace
   - supported: false
     type: AllNamespaces
-  maturity: alpha
+  keywords:
+  - vault
+  - kms
+  - encryption
+  - openshift
+  - security
+  links:
+  - name: Vault KMS Plugin OpenShift Provider
+    url: https://github.com/hashicorp/vault-kms-plugin-openshift-provider
+  - name: Documentation
+    url: https://developer.hashicorp.com/vault/docs/platform/k8s/kms
+  maintainers:
+  - email: support@hashicorp.com
+    name: HashiCorp Support
+  maturity: stable
   provider:
-    name: vault-kms-plugin-openshift-provider
-  version: 0.0.1
+    name: HashiCorp
+    url: https://www.hashicorp.com/
+  minKubeVersion: 1.31.0
+  version: 0.0.0-dev

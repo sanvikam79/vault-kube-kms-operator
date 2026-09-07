@@ -1,4 +1,4 @@
-module github.com/kevinrizza/vault-kms-plugin-openshift-provider
+module github.com/hashicorp/vault-kms-plugin-openshift-provider
 
 go 1.26.0
 

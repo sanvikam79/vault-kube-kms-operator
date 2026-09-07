@@ -1,3 +1,6 @@
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: BUSL-1.1
+
 # This file configures golangci-lint with module plugins.
 # When you run 'make lint', it will automatically build a custom golangci-lint binary
 # with all the plugins listed below.

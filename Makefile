@@ -1,16 +1,17 @@
 VERSION ?= 0.0.1
 
-CHANNELS ?= alpha
+CHANNELS ?= stable
 BUNDLE_CHANNELS := --channels=$(CHANNELS)
 BUNDLE_DEFAULT_CHANNEL := --default-channel=$(CHANNELS)
 BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
 
-IMAGE_TAG_BASE ?= quay.io/kevinrizza/vault-kms-plugin-openshift-provider
+IMAGE_TAG_BASE ?= registry.connect.redhat.com/hashicorp/vault-kms-plugin-openshift-provider
 BUNDLE_IMG ?= $(IMAGE_TAG_BASE)-bundle:v$(VERSION)
 
 BUNDLE_GEN_FLAGS ?= -q --overwrite --version $(VERSION) $(BUNDLE_METADATA_OPTS)
 
 OPERATOR_SDK_VERSION ?= v1.42.3
+COPYWRITE_VERSION ?= 0.18.0
 
 # Image URL to use all building/pushing image targets
 IMG ?= $(IMAGE_TAG_BASE):v$(VERSION)
@@ -103,18 +104,23 @@ setup-test-e2e: ## Set up a Kind cluster with local registry and OLM for e2e tes
 			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
 			$(KIND) create cluster --name $(KIND_CLUSTER) --config=hack/kind-config.yaml; \
 			$(CONTAINER_TOOL) network connect kind kind-registry 2>/dev/null || true; \
-			echo "Installing OLM..."; \
-			operator-sdk olm install; \
 			;; \
 	esac
+	@echo "Checking OLM installation..."; \
+	if operator-sdk olm status --olm-namespace olm >/dev/null 2>&1; then \
+		echo "OLM already installed. Skipping."; \
+	else \
+		echo "Installing OLM..."; \
+		operator-sdk olm install --timeout 5m; \
+	fi
 
 .PHONY: deploy-test-e2e
 deploy-test-e2e: manifests generate fmt vet ## Build images, push to local registry, and install via OLM
 	$(MAKE) docker-build IMG=$(E2E_IMG)
-	$(CONTAINER_TOOL) push --tls-verify=false $(E2E_IMG)
+	$(CONTAINER_TOOL) push $(E2E_IMG)
 	$(MAKE) bundle IMG=$(E2E_IMG)
 	$(MAKE) bundle-build BUNDLE_IMG=$(E2E_BUNDLE_IMG)
-	$(CONTAINER_TOOL) push --tls-verify=false $(E2E_BUNDLE_IMG)
+	$(CONTAINER_TOOL) push $(E2E_BUNDLE_IMG)
 	kubectl create namespace $(E2E_NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
 	operator-sdk run bundle $(E2E_BUNDLE_IMG) --namespace $(E2E_NAMESPACE) --use-http --timeout 5m
 
@@ -226,6 +232,7 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+COPYWRITE ?= $(LOCALBIN)/copywrite
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.8.1
@@ -242,6 +249,12 @@ ENVTEST_K8S_VERSION ?= $(shell v='$(call gomodver,k8s.io/api)'; \
   printf '%s\n' "$$v" | sed -E 's/^v?[0-9]+\.([0-9]+).*/1.\1/')
 
 GOLANGCI_LINT_VERSION ?= v2.12.2
+
+.PHONY: copywrite
+copywrite: ## Download copywrite locally if necessary.
+	@./hack/install_copywrite.sh
+	$(eval COPYWRITE=$(LOCALBIN)/copywrite)
+
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)
@@ -315,10 +328,14 @@ endif
 endif
 
 .PHONY: bundle
-bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metadata, then validate generated files.
+bundle: manifests kustomize operator-sdk copywrite ## Generate bundle manifests and metadata, then validate generated files.
 	$(OPERATOR_SDK) generate kustomize manifests -q
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=$(IMG)
 	"$(KUSTOMIZE)" build config/manifests | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS)
+	$(COPYWRITE) headers
+	bash hack/set_csv_replaces.sh
+	bash hack/set_openshift_minimum_version.sh
+	bash hack/set_containerImage.sh
 	$(OPERATOR_SDK) bundle validate ./bundle
 
 .PHONY: bundle-build

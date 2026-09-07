@@ -1,3 +1,6 @@
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: BUSL-1.1
+
 name: E2E Tests
 
 on:
@@ -7,10 +10,10 @@ on:
 permissions: {}
 
 env:
-  IMG: localhost:5001/vault-kms-plugin-openshift-provider:v0.0.1
-  BUNDLE_IMG: localhost:5001/vault-kms-plugin-openshift-provider-bundle:v0.0.1
   KIND_CLUSTER: vault-kms-plugin-openshift-provider-test-e2e
   OPERATOR_NAMESPACE: openshift-kms-plugin-provider
+  E2E_IMG: localhost:5001/vault-kms-plugin-openshift-provider:v0.0.1
+  E2E_BUNDLE_IMG: localhost:5001/vault-kms-plugin-openshift-provider-bundle:v0.0.1
 
 jobs:
   test-e2e:
@@ -19,7 +22,7 @@ jobs:
     name: Run on Ubuntu
     runs-on: ubuntu-latest
     steps:
-      - name: Clone the code
+      - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
@@ -27,7 +30,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version-file: go.mod
+          go-version-file: .go-version
 
       - name: Install kind
         run: |
@@ -45,50 +48,28 @@ jobs:
 
       - name: Create kind cluster with local registry
         run: |
-          # Start a local registry
           docker run -d --restart=always -p 5001:5000 --network bridge --name kind-registry registry:2
-
-          # Create kind cluster
-          cat <<EOF | kind create cluster --name $KIND_CLUSTER --config=-
-          kind: Cluster
-          apiVersion: kind.x-k8s.io/v1alpha4
-          containerdConfigPatches:
-          - |-
-            [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5001"]
-              endpoint = ["http://kind-registry:5000"]
-          EOF
-
-          # Connect the registry to the kind network
+          kind create cluster --name $KIND_CLUSTER --config=hack/kind-config.yaml
           docker network connect kind kind-registry || true
 
-          # Document the local registry
-          kubectl apply -f - <<EOF
-          apiVersion: v1
-          kind: ConfigMap
-          metadata:
-            name: local-registry-hosting
-            namespace: kube-public
-          data:
-            localRegistryHosting.v1: |
-              host: "localhost:5001"
-              help: "https://kind.sigs.k8s.io/docs/user/local-registry/"
-          EOF
-
       - name: Install OLM
-        run: operator-sdk olm install
+        run: operator-sdk olm install --timeout 5m
 
       - name: Build and push images
         run: |
-          make docker-build IMG=$IMG
-          docker push $IMG
-          make bundle IMG=$IMG
-          make bundle-build BUNDLE_IMG=$BUNDLE_IMG
-          docker push $BUNDLE_IMG
+          make docker-build IMG=$E2E_IMG
+          docker push $E2E_IMG
+          make bundle IMG=$E2E_IMG
+          make bundle-build BUNDLE_IMG=$E2E_BUNDLE_IMG
+          docker push $E2E_BUNDLE_IMG
 
       - name: Install operator via OLM
         run: |
           kubectl create namespace $OPERATOR_NAMESPACE
-          operator-sdk run bundle $BUNDLE_IMG --namespace $OPERATOR_NAMESPACE --use-http --timeout 5m
+          operator-sdk run bundle $E2E_BUNDLE_IMG \
+            --namespace $OPERATOR_NAMESPACE \
+            --use-http \
+            --timeout 5m
 
       - name: Run e2e tests
         run: |
@@ -99,9 +80,9 @@ jobs:
         if: failure()
         run: |
           echo "=== Pods ==="
-          kubectl get pods -n $OPERATOR_NAMESPACE
+          kubectl get pods -n $OPERATOR_NAMESPACE || true
           echo "=== CSV ==="
-          kubectl get csv -n $OPERATOR_NAMESPACE
+          kubectl get csv -n $OPERATOR_NAMESPACE || true
           echo "=== Operator Logs ==="
           kubectl logs -n $OPERATOR_NAMESPACE -l control-plane=controller-manager --tail=100 || true
           echo "=== Events ==="
@@ -110,6 +91,7 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          operator-sdk cleanup vault-kms-plugin-openshift-provider --namespace $OPERATOR_NAMESPACE || true
+          operator-sdk cleanup vault-kms-plugin-openshift-provider \
+            --namespace $OPERATOR_NAMESPACE || true
           kind delete cluster --name $KIND_CLUSTER || true
           docker rm -f kind-registry || true

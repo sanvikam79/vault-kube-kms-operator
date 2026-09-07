@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
 //go:build e2e
 // +build e2e
 
@@ -10,7 +13,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/kevinrizza/vault-kms-plugin-openshift-provider/test/utils"
+	"github.com/hashicorp/vault-kms-plugin-openshift-provider/internal/controller"
+	"github.com/hashicorp/vault-kms-plugin-openshift-provider/internal/version"
+	"github.com/hashicorp/vault-kms-plugin-openshift-provider/test/utils"
 )
 
 var _ = Describe("Vault KMS Plugin OpenShift Provider", Ordered, func() {
@@ -50,9 +55,27 @@ var _ = Describe("Vault KMS Plugin OpenShift Provider", Ordered, func() {
 					"-o", "jsonpath={.data.image}")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("quay.io/kevinrizza/test-vault-plugin-image:latest"))
+				// version.PluginImage is baked into both the operator binary and this test
+				// binary at compile time — same source, same -ldflags, always matches.
+				g.Expect(output).To(Equal(version.PluginImage))
 			}
 			Eventually(verifyConfigMap).Should(Succeed())
+		})
+
+		It("should create the ConfigMap with the required Red Hat label", func() {
+			// Verifies the label config.openshift.io/kms-plugin-image=true is present.
+			// Red Hat's cluster-kube-apiserver-operator discovers the ConfigMap via
+			// this label selector — if missing the cluster goes degraded.
+			verifyLabel := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "configmap",
+					"ibm-kms-vault-plugin-provider",
+					"-n", namespace,
+					"-o", "jsonpath={.metadata.labels.config\\.openshift\\.io/kms-plugin-image}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("true"))
+			}
+			Eventually(verifyLabel).Should(Succeed())
 		})
 
 		It("should restore the ConfigMap after deletion", func() {
@@ -71,7 +94,7 @@ var _ = Describe("Vault KMS Plugin OpenShift Provider", Ordered, func() {
 					"-o", "jsonpath={.data.image}")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("quay.io/kevinrizza/test-vault-plugin-image:latest"))
+				g.Expect(output).To(Equal(version.PluginImage))
 			}
 			Eventually(verifyRecreated).Should(Succeed())
 		})
@@ -94,9 +117,33 @@ var _ = Describe("Vault KMS Plugin OpenShift Provider", Ordered, func() {
 					"-o", "jsonpath={.data.image}")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("quay.io/kevinrizza/test-vault-plugin-image:latest"))
+				g.Expect(output).To(Equal(version.PluginImage))
 			}
 			Eventually(verifyRestored).Should(Succeed())
+		})
+
+		It("should restore the ConfigMap label after removal", func() {
+			// Verifies the reflect.DeepEqual label check — if the label is stripped,
+			// the reconciler detects the mismatch and restores it.
+			By("removing the required label from the ConfigMap")
+			cmd := exec.Command("kubectl", "label", "configmap",
+				"ibm-kms-vault-plugin-provider",
+				"-n", namespace,
+				controller.LabelKMSPluginImage+"-") // kubectl label key- removes the label
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying the label is restored")
+			verifyLabelRestored := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "configmap",
+					"ibm-kms-vault-plugin-provider",
+					"-n", namespace,
+					"-o", "jsonpath={.metadata.labels.config\\.openshift\\.io/kms-plugin-image}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("true"))
+			}
+			Eventually(verifyLabelRestored).Should(Succeed())
 		})
 	})
 })

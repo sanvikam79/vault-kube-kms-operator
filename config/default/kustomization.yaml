@@ -1,3 +1,6 @@
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: BUSL-1.1
+
 # Adds namespace to all resources.
 namespace: openshift-kms-plugin-provider
 

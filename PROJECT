@@ -7,5 +7,5 @@ domain: openshift.io
 layout:
 - go.kubebuilder.io/v4
 projectName: vault-kms-plugin-openshift-provider
-repo: github.com/kevinrizza/vault-kms-plugin-openshift-provider
+repo: github.com/hashicorp/vault-kms-plugin-openshift-provider
 version: "3"
