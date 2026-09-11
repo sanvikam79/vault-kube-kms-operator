@@ -6,7 +6,7 @@ schema = "1"
 project "vault-kms-plugin-openshift-provider" {
   team = "vault"
   slack {
-    notification_channel = "C03RXFX5M4L" // #feed-vault-releases
+    notification_channel = "REDACTED"
   }
   github {
     organization = "hashicorp"
