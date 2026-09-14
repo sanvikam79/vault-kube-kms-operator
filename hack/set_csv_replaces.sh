@@ -24,13 +24,13 @@ if [ -n "${CHECK}" ]; then
 fi
 
 if [ -z "${PREVIOUS_VERSION}" ]; then
-  PREVIOUS_GIT_TAG="$(git describe --abbrev=0 --tags "$(git rev-list --tags --skip=1 --max-count=1)")"
+  PREVIOUS_GIT_TAG="$(git describe --abbrev=0 --tags "$(git rev-list --tags --skip=1 --max-count=1)" 2>/dev/null || true)"
   PREVIOUS_VERSION="${PREVIOUS_GIT_TAG}"
 fi
 
 if [ -z "${PREVIOUS_VERSION}" ]; then
-  echo "unable to determine PREVIOUS_VERSION — set it explicitly or ensure two git tags exist"
-  exit 1
+  echo "No previous git tag found — skipping spec.replaces (first release, no upgrade graph needed)"
+  exit 0
 fi
 
 echo "  replaces: vault-kms-plugin-openshift-provider.${PREVIOUS_VERSION}" >> "${CSV}"

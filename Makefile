@@ -26,10 +26,9 @@ GOBIN=$(shell go env GOBIN)
 endif
 
 # CONTAINER_TOOL defines the container tool to be used for building images.
-# Be aware that the target commands are only tested with Docker which is
-# scaffolded by default. However, you might want to replace it to use other
-# tools. (i.e. podman)
-CONTAINER_TOOL ?= docker
+# Auto-detects podman if docker is not available. Override with:
+#   make test-e2e CONTAINER_TOOL=podman
+CONTAINER_TOOL ?= $(shell command -v docker >/dev/null 2>&1 && echo docker || echo podman)
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -117,10 +116,10 @@ setup-test-e2e: ## Set up a Kind cluster with local registry and OLM for e2e tes
 .PHONY: deploy-test-e2e
 deploy-test-e2e: manifests generate fmt vet ## Build images, push to local registry, and install via OLM
 	$(MAKE) docker-build IMG=$(E2E_IMG)
-	$(CONTAINER_TOOL) push $(E2E_IMG)
+	$(CONTAINER_TOOL) push $(E2E_IMG) $(if $(filter podman,$(CONTAINER_TOOL)),--tls-verify=false,)
 	$(MAKE) bundle IMG=$(E2E_IMG)
 	$(MAKE) bundle-build BUNDLE_IMG=$(E2E_BUNDLE_IMG)
-	$(CONTAINER_TOOL) push $(E2E_BUNDLE_IMG)
+	$(CONTAINER_TOOL) push $(E2E_BUNDLE_IMG) $(if $(filter podman,$(CONTAINER_TOOL)),--tls-verify=false,)
 	kubectl create namespace $(E2E_NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
 	operator-sdk run bundle $(E2E_BUNDLE_IMG) --namespace $(E2E_NAMESPACE) --use-http --timeout 5m
 
@@ -249,6 +248,20 @@ ENVTEST_K8S_VERSION ?= $(shell v='$(call gomodver,k8s.io/api)'; \
   printf '%s\n' "$$v" | sed -E 's/^v?[0-9]+\.([0-9]+).*/1.\1/')
 
 GOLANGCI_LINT_VERSION ?= v2.12.2
+YQ_VERSION ?= v4.44.3
+
+.PHONY: yq
+YQ ?= $(LOCALBIN)/yq
+yq: $(YQ) ## Download yq locally if necessary.
+$(YQ): $(LOCALBIN)
+	@OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
+	for i in 1 2 3; do \
+		curl -sSfLo $(YQ) https://github.com/mikefarah/yq/releases/download/$(YQ_VERSION)/yq_$${OS}_$${ARCH} && break; \
+		echo "yq download attempt $$i failed, retrying in 5s..."; \
+		rm -f $(YQ); \
+		sleep 5; \
+	done && \
+	chmod +x $(YQ)
 
 .PHONY: copywrite
 copywrite: ## Download copywrite locally if necessary.
@@ -328,7 +341,7 @@ endif
 endif
 
 .PHONY: bundle
-bundle: manifests kustomize operator-sdk copywrite ## Generate bundle manifests and metadata, then validate generated files.
+bundle: manifests kustomize operator-sdk copywrite yq ## Generate bundle manifests and metadata, then validate generated files.
 	$(OPERATOR_SDK) generate kustomize manifests -q
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=$(IMG)
 	"$(KUSTOMIZE)" build config/manifests | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS)
@@ -340,7 +353,7 @@ bundle: manifests kustomize operator-sdk copywrite ## Generate bundle manifests 
 
 .PHONY: bundle-build
 bundle-build: ## Build the bundle image.
-	$(CONTAINER_TOOL) build -f bundle.Dockerfile -t $(BUNDLE_IMG) .
+	$(CONTAINER_TOOL) build --provenance=false -f bundle.Dockerfile -t $(BUNDLE_IMG) .
 
 .PHONY: bundle-push
 bundle-push: ## Push the bundle image.

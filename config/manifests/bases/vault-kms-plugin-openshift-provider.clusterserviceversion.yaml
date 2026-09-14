@@ -59,9 +59,9 @@ spec:
       deployments: null
     strategy: ""
   installModes:
-  - supported: false
-    type: OwnNamespace
   - supported: true
+    type: OwnNamespace
+  - supported: false
     type: SingleNamespace
   - supported: false
     type: MultiNamespace
@@ -82,8 +82,8 @@ spec:
   - email: support@hashicorp.com
     name: HashiCorp Support
   maturity: stable
+  minKubeVersion: 1.31.0
   provider:
     name: HashiCorp
     url: https://www.hashicorp.com/
-  minKubeVersion: 1.31.0
   version: 0.0.0-dev

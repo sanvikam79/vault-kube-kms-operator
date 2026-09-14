@@ -1,0 +1,33 @@
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: BUSL-1.1
+
+# Vendor / dependency caches
+vendor/
+
+# Test output
+cover.out
+dist/
+
+# Local tool binaries
+bin/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git metadata
+.git/
+.gitignore
+
+# CI / release files
+.release/
+.github/
+
+# Generated docs
+docs/
+
+# Temp / scratch
+*.tmp
+*.log
