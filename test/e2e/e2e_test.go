@@ -7,15 +7,16 @@
 package e2e
 
 import (
-	"os/exec"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/hashicorp/vault-kms-plugin-openshift-provider/internal/controller"
-	"github.com/hashicorp/vault-kms-plugin-openshift-provider/internal/version"
-	"github.com/hashicorp/vault-kms-plugin-openshift-provider/test/utils"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	kmsv1alpha1 "github.com/hashicorp/vault-kube-kms-operator/api/v1alpha1"
 )
 
 var _ = Describe("Vault KMS Plugin OpenShift Provider", Ordered, func() {
@@ -24,126 +25,100 @@ var _ = Describe("Vault KMS Plugin OpenShift Provider", Ordered, func() {
 
 	Context("OLM installation", func() {
 		It("should have a CSV in Succeeded phase", func() {
-			cmd := exec.Command("kubectl", "get", "csv",
-				"-n", namespace,
-				"-o", "jsonpath={.items[0].status.phase}")
-			output, err := utils.Run(cmd)
+			csvList, err := kubeClient.Discovery().RESTClient().
+				Get().
+				AbsPath("/apis/operators.coreos.com/v1alpha1").
+				Namespace(namespace).
+				Resource("clusterserviceversions").
+				DoRaw(ctx)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(output).To(Equal("Succeeded"))
+			Expect(string(csvList)).To(ContainSubstring(`"phase":"Succeeded"`))
 		})
 
 		It("should have the controller manager pod running", func() {
 			verifyPodRunning := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "pods",
-					"-l", "control-plane=controller-manager",
-					"-n", namespace,
-					"-o", "jsonpath={.items[0].status.phase}")
-				output, err := utils.Run(cmd)
+				pods, err := kubeClient.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+					LabelSelector: "control-plane=controller-manager",
+				})
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("Running"))
+				g.Expect(pods.Items).NotTo(BeEmpty())
+				g.Expect(string(pods.Items[0].Status.Phase)).To(Equal("Running"))
 			}
 			Eventually(verifyPodRunning).Should(Succeed())
 		})
 	})
 
-	Context("ConfigMap reconciliation", func() {
-		It("should create the ConfigMap with the correct data", func() {
-			verifyConfigMap := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "configmap",
-					"ibm-kms-vault-plugin-provider",
-					"-n", namespace,
-					"-o", "jsonpath={.data.image}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				// version.PluginImage is baked into both the operator binary and this test
-				// binary at compile time — same source, same -ldflags, always matches.
-				g.Expect(output).To(Equal(version.PluginImage))
+	Context("VaultKMSConfig CRD", func() {
+		const configName = "e2e-vault-config"
+
+		AfterAll(func() {
+			config := &kmsv1alpha1.VaultKMSConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: configName,
+				},
 			}
-			Eventually(verifyConfigMap).Should(Succeed())
+			_ = k8sClient.Delete(ctx, config)
 		})
 
-		It("should create the ConfigMap with the required Red Hat label", func() {
-			// Verifies the label config.openshift.io/kms-plugin-image=true is present.
-			// Red Hat's cluster-kube-apiserver-operator discovers the ConfigMap via
-			// this label selector — if missing the cluster goes degraded.
-			verifyLabel := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "configmap",
-					"ibm-kms-vault-plugin-provider",
-					"-n", namespace,
-					"-o", "jsonpath={.metadata.labels.config\\.openshift\\.io/kms-plugin-image}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("true"))
-			}
-			Eventually(verifyLabel).Should(Succeed())
+		It("should accept the CRD on the cluster", func() {
+			_, err := kubeClient.Discovery().RESTClient().
+				Get().
+				AbsPath("/apis/apiextensions.k8s.io/v1/customresourcedefinitions/vaultkmsconfigs.kms.openshift.io").
+				DoRaw(ctx)
+			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("should restore the ConfigMap after deletion", func() {
-			By("deleting the ConfigMap")
-			cmd := exec.Command("kubectl", "delete", "configmap",
-				"ibm-kms-vault-plugin-provider",
-				"-n", namespace)
-			_, err := utils.Run(cmd)
+		It("should create a VaultKMSConfig resource", func() {
+			config := &kmsv1alpha1.VaultKMSConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: configName,
+				},
+				Spec: kmsv1alpha1.VaultKMSConfigSpec{
+					VaultAddress: "https://vault.example.com:8200",
+					VaultKeyPath: "transit/keys/my-key",
+					Authentication: kmsv1alpha1.VaultAuthentication{
+						Type: kmsv1alpha1.VaultAuthenticationTypeAppRole,
+						AppRole: kmsv1alpha1.VaultAppRoleAuthentication{
+							Secret: kmsv1alpha1.VaultSecretReference{
+								Name: "vault-approle-creds",
+							},
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, config)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should reconcile the status with the plugin image", func() {
+			verifyStatus := func(g Gomega) {
+				config := &kmsv1alpha1.VaultKMSConfig{}
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: configName}, config)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(config.Status.KMSPluginImage).To(Equal("docker.io/hashicorp/vault-kube-kms:0.1.0-beta"))
+			}
+			Eventually(verifyStatus).Should(Succeed())
+		})
+
+		It("should preserve the plugin image after the spec is modified", func() {
+			By("patching the spec with a new vault address")
+			config := &kmsv1alpha1.VaultKMSConfig{}
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: configName}, config)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying the ConfigMap is recreated")
-			verifyRecreated := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "configmap",
-					"ibm-kms-vault-plugin-provider",
-					"-n", namespace,
-					"-o", "jsonpath={.data.image}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal(version.PluginImage))
-			}
-			Eventually(verifyRecreated).Should(Succeed())
-		})
-
-		It("should restore the ConfigMap data after modification", func() {
-			By("modifying the ConfigMap data")
-			cmd := exec.Command("kubectl", "patch", "configmap",
-				"ibm-kms-vault-plugin-provider",
-				"-n", namespace,
-				"--type", "merge",
-				"-p", `{"data":{"image":"tampered-value"}}`)
-			_, err := utils.Run(cmd)
+			patch := client.MergeFrom(config.DeepCopy())
+			config.Spec.VaultAddress = "https://vault-new.example.com:8200"
+			err = k8sClient.Patch(ctx, config, patch)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("verifying the ConfigMap data is restored")
-			verifyRestored := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "configmap",
-					"ibm-kms-vault-plugin-provider",
-					"-n", namespace,
-					"-o", "jsonpath={.data.image}")
-				output, err := utils.Run(cmd)
+			By("verifying the status still has the plugin image")
+			verifyUpdated := func(g Gomega) {
+				updated := &kmsv1alpha1.VaultKMSConfig{}
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: configName}, updated)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal(version.PluginImage))
+				g.Expect(updated.Status.KMSPluginImage).To(Equal("docker.io/hashicorp/vault-kube-kms:0.1.0-beta"))
 			}
-			Eventually(verifyRestored).Should(Succeed())
-		})
-
-		It("should restore the ConfigMap label after removal", func() {
-			// Verifies the reflect.DeepEqual label check — if the label is stripped,
-			// the reconciler detects the mismatch and restores it.
-			By("removing the required label from the ConfigMap")
-			cmd := exec.Command("kubectl", "label", "configmap",
-				"ibm-kms-vault-plugin-provider",
-				"-n", namespace,
-				controller.LabelKMSPluginImage+"-") // kubectl label key- removes the label
-			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("verifying the label is restored")
-			verifyLabelRestored := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "configmap",
-					"ibm-kms-vault-plugin-provider",
-					"-n", namespace,
-					"-o", "jsonpath={.metadata.labels.config\\.openshift\\.io/kms-plugin-image}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("true"))
-			}
-			Eventually(verifyLabelRestored).Should(Succeed())
+			Eventually(verifyUpdated).Should(Succeed())
 		})
 	})
 })

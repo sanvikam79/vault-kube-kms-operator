@@ -1,4 +1,4 @@
-module github.com/hashicorp/vault-kms-plugin-openshift-provider
+module github.com/hashicorp/vault-kube-kms-operator
 
 go 1.26.0
 

@@ -1,0 +1,349 @@
+<!--
+ Copyright (c) HashiCorp, Inc.
+ SPDX-License-Identifier: BUSL-1.1
+-->
+
+
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>vault-kube-kms-operator — Complete File Guide</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", system-ui, sans-serif; font-size: 14px; line-height: 1.6; background: #ffffff; color: #1f2328; padding: 32px 16px; }
+  .container { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  h2 { font-size: 16px; font-weight: 700; margin: 28px 0 10px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
+  h3 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; color: #1f2328; }
+  .subtitle { color: #57606a; font-size: 13px; margin-bottom: 24px; }
+  code { font-family: "SF Mono", "Fira Code", monospace; font-size: 12px; background: #f7f8fa; border: 1px solid #e5e7eb; padding: 1px 5px; border-radius: 3px; }
+  pre { font-family: "SF Mono", "Fira Code", monospace; font-size: 12px; background: #f7f8fa; border: 1px solid #e5e7eb; padding: 12px 14px; border-radius: 4px; margin: 8px 0; overflow-x: auto; line-height: 1.5; white-space: pre; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 13px; }
+  th { background: #f7f8fa; text-align: left; padding: 7px 10px; border: 1px solid #e5e7eb; font-weight: 600; }
+  td { padding: 6px 10px; border: 1px solid #e5e7eb; vertical-align: top; }
+  tr:nth-child(even) td { background: #fafafa; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 10px; }
+  .hc  { background: #dbeafe; color: #1e40af; }
+  .rh  { background: #fce7f3; color: #9d174d; }
+  .jt  { background: #d1fae5; color: #065f46; }
+  .gen { background: #fef3c7; color: #92400e; }
+  .section { margin-bottom: 8px; }
+  .flow-box { background: #f7f8fa; border: 1px solid #e5e7eb; border-radius: 6px; padding: 14px 16px; margin: 10px 0; }
+  .arrow { color: #57606a; }
+  .highlight { background: #fffbeb; border-left: 3px solid #f59e0b; padding: 8px 12px; margin: 8px 0; font-size: 13px; }
+  .owner-key { display: flex; gap: 12px; margin: 8px 0 16px; flex-wrap: wrap; }
+  .owner-key span { font-size: 12px; }
+  footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid #e5e7eb; text-align: center; font-size: 11px; color: #57606a; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>vault-kube-kms-operator — Complete File Guide</h1>
+<p class="subtitle">Every file explained · New OLM design flow · What depends on Red Hat</p>
+
+<div class="owner-key">
+  <span><span class="badge hc">HC</span> HashiCorp owns</span>
+  <span><span class="badge rh">RH</span> Red Hat owns / influences</span>
+  <span><span class="badge jt">JT</span> Jointly agreed contract</span>
+  <span><span class="badge gen">GEN</span> Generated — do not hand-edit</span>
+</div>
+
+
+<h2>1. Core Go Source</h2>
+
+<h3><code>cmd/main.go</code> <span class="badge hc">HC</span></h3>
+<p>The operator entry point. Starts the controller-runtime manager, registers the <code>kmsv1alpha1</code> scheme so Kubernetes knows about <code>VaultKMSConfig</code> objects, and wires up the <code>VaultKMSConfigReconciler</code>. Also configures health probes, metrics, leader election, and webhook TLS. This file runs when the operator pod starts inside the OCP cluster.</p>
+
+<h3><code>internal/controller/vaultkmsconfig_controller.go</code> <span class="badge jt">JT</span></h3>
+<p>The reconcile loop — the heart of the operator. When the admin creates or updates a <code>VaultKMSConfig</code> CR, Kubernetes fires a watch event. This file handles it:</p>
+<pre>Reconcile() is called
+  1. Fetch the VaultKMSConfig CR by name
+  2. Build desired status:
+       KMSPluginImage: version.PluginImage   ← digest-pinned, baked at compile time
+  3. If current status != desired → write status back to CR
+  4. Red Hat's keyController reads this status → injects sidecar into kube-apiserver</pre>
+<p>Logic is HashiCorp's. The <em>field name</em> (<code>kmsPluginImage</code>) is jointly agreed with Red Hat because their code reads it.</p>
+
+<h3><code>internal/version/version.go</code> <span class="badge hc">HC</span></h3>
+<p>A single variable:</p>
+<pre>var PluginImage = "docker.io/hashicorp/vault-kube-kms:0.1.0-beta"</pre>
+<p>In local dev this default is used. In release builds the CRT pipeline overrides it at compile time via <code>-ldflags "-X ...version.PluginImage=registry...@sha256:..."</code>. This is the <strong>only place</strong> the plugin image digest is set — no YAML, no ConfigMap, no env var. The baked-in digest flows into <code>VaultKMSConfig.status.kmsPluginImage</code> at runtime.</p>
+
+
+<h2>2. CRD API Types</h2>
+
+<h3><code>api/v1alpha1/vaultkmsconfig_types.go</code> <span class="badge jt">JT</span></h3>
+<p>Defines the Go structs for the <code>VaultKMSConfig</code> CRD. Two sections:</p>
+<table>
+<tr><th>Section</th><th>Who owns the fields</th><th>Contents</th></tr>
+<tr><td><code>VaultKMSConfigSpec</code></td><td><span class="badge hc">HC</span> HashiCorp</td><td>vaultAddress, vaultKeyPath, vaultNamespace, authentication (AppRole), TLS — all Vault-specific fields only HashiCorp knows</td></tr>
+<tr><td><code>VaultKMSConfigStatus</code></td><td><span class="badge rh">RH</span> Red Hat named it</td><td>kmsPluginImage — the field Red Hat's keyController reads. Red Hat defined the field name; HashiCorp writes the value.</td></tr>
+</table>
+<p>Also contains CEL validation rules on all spec fields (URL format, path format, DNS name rules etc).</p>
+
+<h3><code>api/v1alpha1/groupversion_info.go</code> <span class="badge rh">RH</span></h3>
+<p>Registers the API group <code>kms.openshift.io/v1alpha1</code> with the Kubernetes scheme. The group name uses Red Hat's <code>openshift.io</code> domain — Red Hat owns this. HashiCorp cannot change the group name unilaterally because Red Hat's <code>keyController</code> is hardcoded to look for this type.</p>
+
+<h3><code>api/v1alpha1/zz_generated.deepcopy.go</code> <span class="badge gen">GEN</span></h3>
+<p>Auto-generated by <code>controller-gen</code> via <code>make generate</code>. Contains <code>DeepCopy()</code> methods required by controller-runtime for all API types. Never edit manually — regenerated on every <code>make generate</code> run.</p>
+
+
+<h2>3. Tests</h2>
+
+<h3><code>internal/controller/vaultkmsconfig_controller_test.go</code> <span class="badge hc">HC</span></h3>
+<p>Unit tests for the reconciler using envtest (real etcd + kube-apiserver, no cluster needed). Three test cases:</p>
+<table>
+<tr><th>Test</th><th>What it verifies</th></tr>
+<tr><td>should populate the status with the plugin image</td><td>When a CR is created with required fields, operator writes <code>version.PluginImage</code> into status</td></tr>
+<tr><td>should set the plugin image regardless of optional spec fields</td><td>Optional fields (TLS, vaultNamespace) do not affect image injection</td></tr>
+<tr><td>should preserve the plugin image after spec changes</td><td>When admin updates vaultAddress/vaultKeyPath, image digest stays the same (not re-encrypted)</td></tr>
+</table>
+
+<h3><code>internal/controller/suite_test.go</code> <span class="badge hc">HC</span></h3>
+<p>Ginkgo test suite bootstrap. Starts envtest (downloads etcd + kube-apiserver via <code>setup-envtest</code>), loads the <code>VaultKMSConfig</code> CRD from <code>config/crd/bases/</code>, registers the scheme, starts the reconciler. Both <code>setup-envtest</code> (binaries) and <code>CRDDirectoryPaths</code> (schema) are required for tests to work.</p>
+
+<h3><code>test/e2e/e2e_test.go</code> + <code>e2e_suite_test.go</code> <span class="badge hc">HC</span></h3>
+<p>End-to-end tests run against a real Kind cluster with OLM installed. Creates a real <code>VaultKMSConfig</code> CR, verifies the operator pod reconciles it correctly (status gets the plugin image), tests operator upgrade flow. Runs via <code>make test-e2e</code> — takes 5-10 minutes.</p>
+
+
+<h2>4. Build &amp; Release</h2>
+
+<h3><code>Dockerfile</code> <span class="badge hc">HC</span></h3>
+<p>Three-stage build following the VSO pattern required for Red Hat certification:</p>
+<pre>Stage 1 (builder):    golang:1.26 — compiles the operator binary
+                      ARG LD_FLAGS — receives digest from CRT pipeline
+                      go build -ldflags "$LD_FLAGS" → bakes PluginImage into binary
+
+Stage 2 (build-ubi):  ubi-minimal — only used to refresh CA certificates
+                      microdnf upgrade ca-certificates
+
+Stage 3 (release-ubi): ubi-micro — final minimal image
+                       Copies binary + CA bundle + LICENSE
+                       OCI labels required by Red Hat preflight certification</pre>
+
+<h3><code>Makefile</code> <span class="badge hc">HC</span></h3>
+<p>All build targets. Key targets:</p>
+<table>
+<tr><th>Target</th><th>What it does</th></tr>
+<tr><td><code>make build</code></td><td>Compiles operator binary locally</td></tr>
+<tr><td><code>make test</code></td><td>Unit tests via envtest (3/3 passing)</td></tr>
+<tr><td><code>make test-e2e</code></td><td>Full e2e: Kind cluster + OLM + deploy operator + run tests (6/6 passing)</td></tr>
+<tr><td><code>make bundle</code></td><td>Generates OLM bundle: CRD YAML + CSV + RBAC + copywrite headers + hack scripts</td></tr>
+<tr><td><code>make docker-build</code></td><td>Builds operator Docker image (UBI-micro based)</td></tr>
+<tr><td><code>make generate</code></td><td>Regenerates zz_generated.deepcopy.go</td></tr>
+<tr><td><code>make manifests</code></td><td>Regenerates CRD YAML and RBAC from Go annotations</td></tr>
+</table>
+<p>HashiCorp-specific additions over Kevin's scaffold: CONTAINER_TOOL auto-detect (docker/podman), podman TLS flag, yq with 3-retry download, copywrite tool, <code>--provenance=false</code> for bundle build, <code>IMG_UBI</code> for Red Hat catalog image.</p>
+
+<h3><code>bundle.Dockerfile</code> <span class="badge gen">GEN</span></h3>
+<p>Generated by <code>make bundle</code>. Defines how to build the OLM bundle image (the package OLM uses to install the operator). Contains FROM scratch + COPY of bundle/ directory. Never edit manually.</p>
+
+<h3><code>internal/version/version.go</code> <span class="badge hc">HC</span></h3>
+<p>Already covered above — the ldflags-injectable plugin image variable.</p>
+
+
+<h2>5. CRD and Config (Generated)</h2>
+
+<h3><code>config/crd/bases/kms.openshift.io_vaultkmsconfigs.yaml</code> <span class="badge gen">GEN</span></h3>
+<p>The actual CRD schema YAML. Generated by <code>controller-gen</code> from the Go struct annotations in <code>vaultkmsconfig_types.go</code>. When the OLM operator is installed, this CRD is applied to the cluster — this is what registers <code>VaultKMSConfig</code> as a valid Kubernetes type. Contains all CEL validation rules.</p>
+
+<h3><code>config/rbac/role.yaml</code> <span class="badge gen">GEN</span></h3>
+<p>Generated RBAC ClusterRole. Gives the operator permission to get/list/watch/create/update/patch <code>VaultKMSConfig</code> objects and their status subresource. Without this the operator pod cannot read or write CRs.</p>
+
+<h3><code>config/manager/manager.yaml</code> <span class="badge hc">HC</span></h3>
+<p>The operator Deployment manifest. Defines the operator pod — image, resource limits, health probe ports, security context (non-root). This is what OLM deploys into the cluster when the admin installs the operator.</p>
+
+<h3><code>config/manifests/bases/vault-kube-kms-operator.clusterserviceversion.yaml</code> <span class="badge hc">HC</span></h3>
+<p>The hand-authored CSV base. Contains operator metadata shown in OperatorHub: displayName, description, maturity (stable), installModes (AllNamespaces), owned CRDs list. This is the template — <code>make bundle</code> combines it with generated RBAC and deployment spec to produce the full bundle CSV.</p>
+
+
+<h2>6. OLM Bundle (Generated by make bundle)</h2>
+
+<h3><code>bundle/manifests/vault-kube-kms-operator.clusterserviceversion.yaml</code> <span class="badge gen">GEN</span></h3>
+<p>The complete OLM ClusterServiceVersion. Generated from the bases CSV + kustomize + hack scripts. Contains: full deployment spec, RBAC permissions, owned CRDs, containerImage annotation, spec.replaces for upgrade graph, com.redhat.openshift.versions annotation. This is what OLM reads to install and manage the operator.</p>
+
+<h3><code>bundle/manifests/kms.openshift.io_vaultkmsconfigs.yaml</code> <span class="badge gen">GEN</span></h3>
+<p>Copy of the CRD YAML included in the bundle so OLM can register the CRD when installing the operator.</p>
+
+<h3><code>bundle/metadata/annotations.yaml</code> <span class="badge gen">GEN</span></h3>
+<p>OLM bundle metadata. Channel (stable), package name (vault-kube-kms-operator), minimum OpenShift version (v4.18 — set by hack script). Red Hat's certification pipeline reads these annotations.</p>
+
+
+<h2>7. Hack Scripts</h2>
+
+<h3><code>hack/set_csv_replaces.sh</code> <span class="badge hc">HC</span></h3>
+<p>Sets <code>spec.replaces: vault-kube-kms-operator.vX.Y.Z</code> in the bundle CSV. This builds the OLM upgrade graph — tells OLM that this version upgrades from the previous one. Uses the previous git tag automatically. Skipped gracefully on first release (no previous tag).</p>
+
+<h3><code>hack/set_openshift_minimum_version.sh</code> <span class="badge hc">HC</span></h3>
+<p>Appends <code>com.redhat.openshift.versions: v4.18</code> to bundle annotations. Red Hat's certification pipeline reads this to ensure the operator is only installable on OCP 4.18+. Value 4.18 is the first OCP release expected to ship the cluster-kube-apiserver-operator changes that read <code>VaultKMSConfig.status</code>.</p>
+
+<h3><code>hack/set_containerImage.sh</code> <span class="badge hc">HC</span></h3>
+<p>Sets the <code>containerImage</code> annotation in the bundle CSV to match the actual operator image in the deployment spec. OperatorHub displays this in the UI. Uses <code>yq</code> to read the image from the deployment spec and write it back as an annotation.</p>
+
+<h3><code>hack/install_copywrite.sh</code> <span class="badge hc">HC</span></h3>
+<p>Downloads the HashiCorp copywrite tool. Used by <code>make bundle</code> to add BUSL-1.1 copyright headers to all generated files (YAML, Go, shell scripts).</p>
+
+<h3><code>hack/kind-config.yaml</code> <span class="badge hc">HC</span></h3>
+<p>Kind cluster config for e2e tests. Pins the node image to <code>kindest/node:v1.33.1</code> and configures the local registry mirror (<code>localhost:5001</code>) so the operator image can be pulled by the Kind cluster during e2e tests.</p>
+
+<h3><code>hack/boilerplate.go.txt</code> <span class="badge hc">HC</span></h3>
+<p>BUSL-1.1 copyright header template. Used by <code>controller-gen</code> (<code>make generate</code>) to prepend the correct license header to all generated Go files.</p>
+
+
+<h2>8. HashiCorp Release Pipeline</h2>
+
+<h3><code>.release/ci.hcl</code> <span class="badge hc">HC</span></h3>
+<p>CRT (Common Release Tooling) CI configuration. Defines the release pipeline steps: build, test, sign, publish. References the repository name and configures which artifacts to produce.</p>
+
+<h3><code>.release/release-metadata.hcl</code> <span class="badge hc">HC</span></h3>
+<p>Release metadata: product name, license URL, source repository URL. Used by HashiCorp's release infrastructure to populate release notes and artifact metadata.</p>
+
+<h3><code>.release/vault-kube-kms-operator-artifacts.hcl</code> <span class="badge hc">HC</span></h3>
+<p>Defines which artifact files the CRT pipeline should produce per release: UBI docker tarballs for amd64 and arm64, both regular and Red Hat catalog variants.</p>
+
+<h3><code>.release/security-scan.hcl</code> <span class="badge hc">HC</span></h3>
+<p>Security scanning configuration for the CRT pipeline. Defines which images to scan for CVEs before publishing to Red Hat catalog.</p>
+
+<h3><code>.release/plugin-version</code> <span class="badge hc">HC</span></h3>
+<p>Tracks the vault-kube-kms plugin binary version that this operator version ships. Used by the release pipeline to correlate the operator version with the plugin version.</p>
+
+
+<h2>9. GitHub Actions CI</h2>
+
+<h3><code>.github/workflows/test.yml</code> <span class="badge hc">HC</span></h3>
+<p>Runs <code>make test</code> on every push and pull request. Uses <code>.go-version</code> file to pin the Go version. Validates that unit tests pass and controller logic is correct.</p>
+
+<h3><code>.github/workflows/test-e2e.yml</code> <span class="badge hc">HC</span></h3>
+<p>Runs <code>make test-e2e</code> on PRs. Creates a Kind cluster, installs OLM, builds and deploys the operator, runs 6 e2e specs. Uses <code>E2E_IMG</code> and <code>E2E_BUNDLE_IMG</code> vars pointing to local registry.</p>
+
+<h3><code>.github/workflows/lint.yml</code> <span class="badge hc">HC</span></h3>
+<p>Runs golangci-lint on every push. Uses <code>.golangci.yml</code> config and the custom <code>.custom-gcl.yml</code> for additional lint rules.</p>
+
+<h3><code>.github/workflows/build.yaml</code> <span class="badge hc">HC</span></h3>
+<p>Builds the operator Docker image on every push to verify the Dockerfile compiles cleanly. Does not push to registry.</p>
+
+
+<h2>10. Project Metadata</h2>
+
+<h3><code>PROJECT</code> <span class="badge hc">HC</span></h3>
+<p>kubebuilder project config. Records the project name (<code>vault-kube-kms-operator</code>), module path, domain (<code>openshift.io</code>), and registered API resources. <code>operator-sdk generate kustomize manifests</code> reads this to determine the CSV filename. Wrong project name = duplicate CSV error.</p>
+
+<h3><code>go.mod</code> <span class="badge hc">HC</span></h3>
+<p>Go module definition. Module path: <code>github.com/hashicorp/vault-kube-kms-operator</code>. All import paths in the codebase resolve relative to this. Also pins controller-runtime, client-go, and k8s.io versions which must stay in sync.</p>
+
+<h3><code>.copywrite.hcl</code> <span class="badge hc">HC</span></h3>
+<p>HashiCorp copywrite tool config. Sets license to BUSL-1.1, copyright year 2025, and excludes <code>.idea/</code> and <code>build/</code> from header checks.</p>
+
+<h3><code>LICENSE</code> <span class="badge hc">HC</span></h3>
+<p>BUSL-1.1 (Business Source License). This is why the operator code cannot be open sourced or included in the OCP release payload — it is HashiCorp proprietary. The entire OLM operator design exists because of this license restriction.</p>
+
+<h3><code>CODEOWNERS</code> <span class="badge hc">HC</span></h3>
+<p>GitHub CODEOWNERS file. Defines which HashiCorp team must review PRs. Ensures the right team is notified on all changes.</p>
+
+
+<h2>11. How the New OLM Design Works End-to-End</h2>
+
+<div class="flow-box">
+<pre>
+STEP 1 — HashiCorp releases operator
+  CRT pipeline builds operator binary with:
+    -ldflags "-X ...version.PluginImage=registry...vault-kube-kms@sha256:abc123"
+  Publishes operator bundle to Red Hat Operator Catalog
+
+STEP 2 — OCP admin installs operator
+  kubectl apply -f subscription.yaml
+  OLM reads bundle → applies CRD to cluster → starts operator pod
+  Operator pod starts, registers Watch on VaultKMSConfig objects
+
+STEP 3 — Admin creates VaultKMSConfig CR (one time)
+  kubectl apply -f vault-kms-config.yaml
+    spec:
+      vaultAddress: https://vault.company.com:8200
+      vaultKeyPath: transit/keys/ocp-key
+      authentication:
+        type: AppRole
+        appRole:
+          secret:
+            name: vault-approle-creds
+
+STEP 4 — Operator reconciles (automatic)
+  Watch fires → Reconcile() called
+  Reads: spec.vaultAddress, spec.vaultKeyPath (admin's Vault config)
+  Writes: status.kmsPluginImage = version.PluginImage (baked digest)
+  Result in etcd:
+    status:
+      kmsPluginImage: registry.connect.redhat.com/hashicorp/vault-kube-kms@sha256:abc123
+
+STEP 5 — Admin points APIServer at the CR
+  kubectl edit apiserver cluster
+    spec.encryption.kms.pluginConfig:
+      kind: VaultKMSConfig
+      name: my-vault-kms
+
+STEP 6 — Red Hat keyController acts (automatic)
+  Reads VaultKMSConfig.status.kmsPluginImage
+  Reads VaultKMSConfig.spec fields (vaultAddress, vaultKeyPath, auth)
+  Builds vault-kube-kms sidecar container with correct CLI flags
+  Injects sidecar into kube-apiserver static pod
+  kube-apiserver starts encrypting etcd with Vault Transit keys
+</pre>
+</div>
+
+
+<h2>12. What Depends on Red Hat</h2>
+
+<table>
+<tr><th>Item</th><th>Dependency</th><th>Why</th></tr>
+<tr>
+  <td><code>kms.openshift.io</code> group name</td>
+  <td><span class="badge rh">RH</span> Red Hat domain</td>
+  <td>Red Hat owns openshift.io domain. Cannot change without Red Hat.</td>
+</tr>
+<tr>
+  <td><code>v1alpha1</code> → <code>v1</code> promotion</td>
+  <td><span class="badge rh">RH</span> Red Hat decides</td>
+  <td>OpenShift API versioning policy. Red Hat promotes when design is finalized.</td>
+</tr>
+<tr>
+  <td><code>status.kmsPluginImage</code> field name</td>
+  <td><span class="badge jt">JT</span> Jointly agreed</td>
+  <td>Red Hat's keyController reads this exact field name. Cannot rename without coordinating.</td>
+</tr>
+<tr>
+  <td><code>spec</code> field names (vaultAddress etc)</td>
+  <td><span class="badge hc">HC</span> HashiCorp decides</td>
+  <td>Only HashiCorp knows what the vault-kube-kms plugin CLI accepts.</td>
+</tr>
+<tr>
+  <td><code>com.redhat.openshift.versions: v4.18</code></td>
+  <td><span class="badge rh">RH</span> Red Hat certification</td>
+  <td>Red Hat's preflight scanner reads this. Must match OCP version that ships keyController changes.</td>
+</tr>
+<tr>
+  <td>Operator catalog listing</td>
+  <td><span class="badge rh">RH</span> Red Hat certifies</td>
+  <td>Red Hat runs certification pipeline to approve the bundle before it appears in catalog.</td>
+</tr>
+<tr>
+  <td>UBI base image version</td>
+  <td><span class="badge rh">RH</span> Red Hat provides</td>
+  <td>ubi-micro:10.2 and ubi-minimal:10.2 are Red Hat images. Updated by Red Hat, CVEs tracked by Red Hat.</td>
+</tr>
+<tr>
+  <td>enhancements PR #2082 design doc</td>
+  <td><span class="badge rh">RH</span> Red Hat owns</td>
+  <td>Formal API contract document. Red Hat must approve any changes to the interface design.</td>
+</tr>
+<tr>
+  <td>Everything else</td>
+  <td><span class="badge hc">HC</span> HashiCorp owns</td>
+  <td>Build pipeline, release pipeline, image digest, controller logic, Makefile, Dockerfile, tests, version.go.</td>
+</tr>
+</table>
+
+<footer>Made with IBM Bob</footer>
+</div>
+</body>
+</html>

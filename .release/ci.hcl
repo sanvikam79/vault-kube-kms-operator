@@ -3,14 +3,14 @@
 
 schema = "1"
 
-project "vault-kms-plugin-openshift-provider" {
+project "vault-kube-kms-operator" {
   team = "vault"
   slack {
-    notification_channel = "REDACTED"
+    notification_channel = "C03RXFX5M4L" // #feed-vault-releases
   }
   github {
     organization = "hashicorp"
-    repository   = "vault-kms-plugin-openshift-provider"
+    repository   = "vault-kube-kms-operator"
     release_branches = [
       "main",
       "release/**",
@@ -27,7 +27,7 @@ event "build" {
   depends = ["merge"]
   action "build" {
     organization = "hashicorp"
-    repository   = "vault-kms-plugin-openshift-provider"
+    repository   = "vault-kube-kms-operator"
     workflow     = "build"
   }
 }

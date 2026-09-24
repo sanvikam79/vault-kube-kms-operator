@@ -5,7 +5,7 @@ BUNDLE_CHANNELS := --channels=$(CHANNELS)
 BUNDLE_DEFAULT_CHANNEL := --default-channel=$(CHANNELS)
 BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
 
-IMAGE_TAG_BASE ?= registry.connect.redhat.com/hashicorp/vault-kms-plugin-openshift-provider
+IMAGE_TAG_BASE ?= hashicorp/vault-kube-kms-operator
 BUNDLE_IMG ?= $(IMAGE_TAG_BASE)-bundle:v$(VERSION)
 
 BUNDLE_GEN_FLAGS ?= -q --overwrite --version $(VERSION) $(BUNDLE_METADATA_OPTS)
@@ -15,6 +15,7 @@ COPYWRITE_VERSION ?= 0.18.0
 
 # Image URL to use all building/pushing image targets
 IMG ?= $(IMAGE_TAG_BASE):v$(VERSION)
+IMG_UBI ?= registry.connect.redhat.com/hashicorp/vault-kube-kms-operator:v$(VERSION)-ubi
 # YEAR defines the year value used for substituting the YEAR placeholder in the boilerplate header.
 YEAR ?= $(shell date +%Y)
 
@@ -77,11 +78,11 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-KIND_CLUSTER ?= vault-kms-plugin-openshift-provider-test-e2e
+KIND_CLUSTER ?= vault-kube-kms-operator-test-e2e
 E2E_NAMESPACE ?= openshift-kms-plugin-provider
 E2E_REGISTRY ?= localhost:5001
-E2E_IMG ?= $(E2E_REGISTRY)/vault-kms-plugin-openshift-provider:v$(VERSION)
-E2E_BUNDLE_IMG ?= $(E2E_REGISTRY)/vault-kms-plugin-openshift-provider-bundle:v$(VERSION)
+E2E_IMG ?= $(E2E_REGISTRY)/vault-kube-kms-operator:v$(VERSION)
+E2E_BUNDLE_IMG ?= $(E2E_REGISTRY)/vault-kube-kms-operator-bundle:v$(VERSION)
 
 .PHONY: setup-test-e2e
 setup-test-e2e: ## Set up a Kind cluster with local registry and OLM for e2e tests
@@ -132,7 +133,7 @@ test-e2e: setup-test-e2e deploy-test-e2e ## Run e2e tests: create cluster, insta
 
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster and local registry used for e2e tests
-	@operator-sdk cleanup vault-kms-plugin-openshift-provider --namespace $(E2E_NAMESPACE) 2>/dev/null || true
+	@operator-sdk cleanup vault-kube-kms-operator --namespace $(E2E_NAMESPACE) 2>/dev/null || true
 	@$(KIND) delete cluster --name $(KIND_CLUSTER) 2>/dev/null || true
 	@$(CONTAINER_TOOL) rm -f kind-registry 2>/dev/null || true
 
@@ -180,10 +181,10 @@ PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
 docker-buildx: ## Build and push docker image for the manager for cross-platform support
 	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
-	- $(CONTAINER_TOOL) buildx create --name vault-kms-plugin-openshift-provider-builder
-	$(CONTAINER_TOOL) buildx use vault-kms-plugin-openshift-provider-builder
+	- $(CONTAINER_TOOL) buildx create --name vault-kube-kms-operator-builder
+	$(CONTAINER_TOOL) buildx use vault-kube-kms-operator-builder
 	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
-	- $(CONTAINER_TOOL) buildx rm vault-kms-plugin-openshift-provider-builder
+	- $(CONTAINER_TOOL) buildx rm vault-kube-kms-operator-builder
 	rm Dockerfile.cross
 
 .PHONY: build-installer
@@ -342,7 +343,7 @@ endif
 
 .PHONY: bundle
 bundle: manifests kustomize operator-sdk copywrite yq ## Generate bundle manifests and metadata, then validate generated files.
-	$(OPERATOR_SDK) generate kustomize manifests -q
+	$(OPERATOR_SDK) generate kustomize manifests -q --interactive=false
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=$(IMG)
 	"$(KUSTOMIZE)" build config/manifests | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS)
 	$(COPYWRITE) headers

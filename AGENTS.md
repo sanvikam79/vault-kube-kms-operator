@@ -1,4 +1,4 @@
-# vault-kms-plugin-openshift-provider - AI Agent Guide
+# vault-kube-kms-operator - AI Agent Guide
 
 ## Project Structure
 

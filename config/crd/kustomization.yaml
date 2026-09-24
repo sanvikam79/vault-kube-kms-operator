@@ -2,5 +2,4 @@
 # SPDX-License-Identifier: BUSL-1.1
 
 resources:
-- bases/vault-kube-kms-operator.clusterserviceversion.yaml
-- ../default
+- bases/kms.openshift.io_vaultkmsconfigs.yaml

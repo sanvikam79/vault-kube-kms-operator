@@ -10,10 +10,10 @@ on:
 permissions: {}
 
 env:
-  KIND_CLUSTER: vault-kms-plugin-openshift-provider-test-e2e
+  KIND_CLUSTER: vault-kube-kms-operator-test-e2e
   OPERATOR_NAMESPACE: openshift-kms-plugin-provider
-  E2E_IMG: localhost:5001/vault-kms-plugin-openshift-provider:v0.0.1
-  E2E_BUNDLE_IMG: localhost:5001/vault-kms-plugin-openshift-provider-bundle:v0.0.1
+  E2E_IMG: localhost:5001/vault-kube-kms-operator:v0.0.1
+  E2E_BUNDLE_IMG: localhost:5001/vault-kube-kms-operator-bundle:v0.0.1
 
 jobs:
   test-e2e:
@@ -91,7 +91,7 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          operator-sdk cleanup vault-kms-plugin-openshift-provider \
+          operator-sdk cleanup vault-kube-kms-operator \
             --namespace $OPERATOR_NAMESPACE || true
           kind delete cluster --name $KIND_CLUSTER || true
           docker rm -f kind-registry || true

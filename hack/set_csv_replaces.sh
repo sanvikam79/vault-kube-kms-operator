@@ -13,7 +13,7 @@ set -e -o pipefail
 # calling this script (used by the CRT release pipeline when the git history is
 # not fully available).
 
-CSV="bundle/manifests/vault-kms-plugin-openshift-provider.clusterserviceversion.yaml"
+CSV="bundle/manifests/vault-kube-kms-operator.clusterserviceversion.yaml"
 
 # Already set — nothing to do (idempotent re-run safety).
 CHECK="$(grep 'replaces:' "${CSV}" || true)"
@@ -33,5 +33,5 @@ if [ -z "${PREVIOUS_VERSION}" ]; then
   exit 0
 fi
 
-echo "  replaces: vault-kms-plugin-openshift-provider.${PREVIOUS_VERSION}" >> "${CSV}"
-echo "Set spec.replaces = vault-kms-plugin-openshift-provider.${PREVIOUS_VERSION} in ${CSV}"
+echo "  replaces: vault-kube-kms-operator.${PREVIOUS_VERSION}" >> "${CSV}"
+echo "Set spec.replaces = vault-kube-kms-operator.${PREVIOUS_VERSION} in ${CSV}"

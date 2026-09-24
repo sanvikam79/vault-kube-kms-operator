@@ -16,7 +16,7 @@ on:
         required: false
 
 env:
-  PKG_NAME: "vault-kms-plugin-openshift-provider"
+  PKG_NAME: "vault-kube-kms-operator"
   # used by scripts that fetch build tools from GH
   GH_GET_RETRIES: 5
 

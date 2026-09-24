@@ -5,10 +5,13 @@ package controller
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	kmsv1alpha1 "github.com/hashicorp/vault-kube-kms-operator/api/v1alpha1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -22,10 +25,11 @@ var (
 	cfg       *rest.Config
 	k8sClient client.Client
 	testEnv   *envtest.Environment
+	ctx       context.Context
 	cancelFn  context.CancelFunc
 )
 
-func TestController(t *testing.T) {
+func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Controller Suite")
 }
@@ -33,32 +37,36 @@ func TestController(t *testing.T) {
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
+	ctx, cancelFn = context.WithCancel(context.Background())
+
 	By("bootstrapping test environment")
-	testEnv = &envtest.Environment{}
+	testEnv = &envtest.Environment{
+		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		ErrorIfCRDPathMissing: true,
+	}
 
 	var err error
 	cfg, err = testEnv.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
+	err = kmsv1alpha1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
-	// Start the controller manager so the reconciler is active during tests.
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme.Scheme,
 	})
 	Expect(err).NotTo(HaveOccurred())
 
-	reconciler := &VaultKMSProviderConfigMapReconciler{
-		Client:    mgr.GetClient(),
-		Namespace: testNamespace,
-	}
-	Expect(reconciler.SetupWithManager(mgr)).To(Succeed())
+	err = (&VaultKMSConfigReconciler{
+		Client: mgr.GetClient(),
+	}).SetupWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
 
-	var ctx context.Context
-	ctx, cancelFn = context.WithCancel(context.Background())
 	go func() {
 		defer GinkgoRecover()
 		Expect(mgr.Start(ctx)).To(Succeed())

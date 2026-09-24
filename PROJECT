@@ -6,6 +6,16 @@ cliVersion: 4.15.0
 domain: openshift.io
 layout:
 - go.kubebuilder.io/v4
-projectName: vault-kms-plugin-openshift-provider
-repo: github.com/hashicorp/vault-kms-plugin-openshift-provider
+projectName: vault-kube-kms-operator
+repo: github.com/hashicorp/vault-kube-kms-operator
+resources:
+- api:
+    crdVersion: v1
+    namespaced: false
+  controller: true
+  domain: openshift.io
+  group: kms
+  kind: VaultKMSConfig
+  path: github.com/hashicorp/vault-kube-kms-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"

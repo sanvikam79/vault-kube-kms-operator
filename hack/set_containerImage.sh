@@ -10,7 +10,7 @@ set -e -o pipefail
 # Requires: bin/yq (install via 'make yq')
 
 HACK_DIR=$(dirname "$0")
-CSV_FILE="${HACK_DIR}/../bundle/manifests/vault-kms-plugin-openshift-provider.clusterserviceversion.yaml"
+CSV_FILE="${HACK_DIR}/../bundle/manifests/vault-kube-kms-operator.clusterserviceversion.yaml"
 YQ="${HACK_DIR}/../bin/yq"
 
 if [ ! -f "${YQ}" ]; then

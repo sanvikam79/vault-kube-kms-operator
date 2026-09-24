@@ -8,7 +8,7 @@ ARG TARGETARCH
 
 # LD_FLAGS is injected by the CRT release pipeline to bake version.PluginImage
 # and other build metadata into the binary at compile time.
-# e.g. -X github.com/hashicorp/vault-kms-plugin-openshift-provider/internal/version.PluginImage=docker.io/hashicorp/vault-kube-kms@sha256:...
+# e.g. -X github.com/hashicorp/vault-kube-kms-operator/internal/version.PluginImage=docker.io/hashicorp/vault-kube-kms@sha256:...
 ARG LD_FLAGS
 
 WORKDIR /workspace
@@ -38,7 +38,7 @@ RUN microdnf --refresh --assumeyes upgrade ca-certificates
 # ubi-micro is FIPS-validated and accepted in the Red Hat Catalog.
 FROM registry.access.redhat.com/ubi10/ubi-micro:10.2 AS release-ubi
 
-ENV BIN_NAME=vault-kms-plugin-openshift-provider
+ENV BIN_NAME=vault-kube-kms-operator
 ARG PRODUCT_VERSION
 ARG PRODUCT_REVISION
 ARG PRODUCT_NAME=$BIN_NAME
