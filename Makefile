@@ -80,6 +80,10 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
 KIND_CLUSTER ?= vault-kube-kms-operator-test-e2e
+# KIND_K8S_VERSION controls the kindest/node image used to create the Kind cluster.
+# Override to test against a specific OCP-aligned k8s version, e.g.:
+#   make test-e2e KIND_K8S_VERSION=v1.32.5
+KIND_K8S_VERSION ?= v1.33.1
 E2E_NAMESPACE ?= openshift-kms-plugin-provider
 E2E_REGISTRY ?= localhost:5001
 E2E_IMG ?= $(E2E_REGISTRY)/vault-kube-kms-operator:v$(VERSION)
@@ -103,7 +107,7 @@ setup-test-e2e: ## Set up a Kind cluster with local registry and OLM for e2e tes
 			$(CONTAINER_TOOL) inspect kind-registry >/dev/null 2>&1 || \
 				$(CONTAINER_TOOL) run -d --restart=always -p 5001:5000 --name kind-registry registry:2; \
 			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
-			$(KIND) create cluster --name $(KIND_CLUSTER) --config=hack/kind-config.yaml; \
+			$(KIND) create cluster --name $(KIND_CLUSTER) --image kindest/node:$(KIND_K8S_VERSION) --config=hack/kind-config.yaml; \
 			$(CONTAINER_TOOL) network connect kind kind-registry 2>/dev/null || true; \
 			;; \
 	esac
