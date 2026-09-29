@@ -39,4 +39,3 @@ go.work.sum
 bundle/manifests/
 bundle/metadata/
 bundle.Dockerfile
-config/rbac/role.yaml
