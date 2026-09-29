@@ -5,7 +5,28 @@ apiVersion: operators.coreos.com/v1alpha1
 kind: ClusterServiceVersion
 metadata:
   annotations:
-    alm-examples: '[]'
+    alm-examples: |-
+      [
+        {
+          "apiVersion": "kms.openshift.io/v1alpha1",
+          "kind": "VaultKMSConfig",
+          "metadata": {
+            "name": "cluster"
+          },
+          "spec": {
+            "vaultAddress": "https://vault.example.com:8200",
+            "vaultKeyPath": "transit/keys/etcd-encryption-key",
+            "authentication": {
+              "type": "AppRole",
+              "appRole": {
+                "secret": {
+                  "name": "vault-approle-credentials"
+                }
+              }
+            }
+          }
+        }
+      ]
     capabilities: Seamless Upgrades
     categories: Security
     containerImage: registry.connect.redhat.com/hashicorp/vault-kube-kms-operator

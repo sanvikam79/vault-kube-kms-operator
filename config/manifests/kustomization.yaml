@@ -4,3 +4,4 @@
 resources:
 - bases/vault-kube-kms-operator.clusterserviceversion.yaml
 - ../default
+- ../samples
