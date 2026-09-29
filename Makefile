@@ -129,6 +129,22 @@ deploy-test-e2e: manifests generate fmt vet ## Build images, push to local regis
 	kubectl create namespace $(E2E_NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
 	operator-sdk run bundle $(E2E_BUNDLE_IMG) --namespace $(E2E_NAMESPACE) --use-http --timeout 5m
 
+# ci-deploy-test-e2e is used by the CI e2e-tests job.
+# It assumes the operator image (IMG) is already loaded into Docker by the
+# caller (via docker load of the artifact from build-docker-ubi).
+# It tags and pushes that pre-built image to the local Kind registry,
+# then builds the bundle image and installs the operator via OLM.
+# This avoids a redundant docker build in CI.
+.PHONY: ci-deploy-test-e2e
+ci-deploy-test-e2e: ## Push pre-built image to local registry and install via OLM (CI use only)
+	$(CONTAINER_TOOL) tag $(IMG) $(E2E_IMG)
+	$(CONTAINER_TOOL) push $(E2E_IMG) $(if $(filter podman,$(CONTAINER_TOOL)),--tls-verify=false,)
+	$(MAKE) bundle IMG=$(E2E_IMG)
+	$(MAKE) bundle-build BUNDLE_IMG=$(E2E_BUNDLE_IMG)
+	$(CONTAINER_TOOL) push $(E2E_BUNDLE_IMG) $(if $(filter podman,$(CONTAINER_TOOL)),--tls-verify=false,)
+	kubectl create namespace $(E2E_NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
+	operator-sdk run bundle $(E2E_BUNDLE_IMG) --namespace $(E2E_NAMESPACE) --use-http --timeout 5m
+
 .PHONY: test-e2e
 test-e2e: setup-test-e2e deploy-test-e2e ## Run e2e tests: create cluster, install via OLM, run tests, clean up.
 	go test -tags=e2e ./test/e2e/ -v -ginkgo.v -e2e.namespace=$(E2E_NAMESPACE); \
