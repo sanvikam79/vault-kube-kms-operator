@@ -166,22 +166,26 @@ jobs:
           make bundle IMG=$IMG
           make bundle-build BUNDLE_IMG=$BUNDLE_IMG
 
-  # OCP-aligned k8s versions for the e2e matrix.
-  # Each OCP release ships a specific k8s version — we test against those
-  # to ensure OLM lifecycle and CRD behaviour matches what OCP users see.
+  # k8s versions for the e2e matrix.
+  # Tests run on Kind clusters (plain upstream Kubernetes) — NOT on real OCP clusters.
+  # We choose versions that match what supported OCP releases ship so that
+  # any OLM or CRD behaviour differences across k8s versions are caught early.
+  # OCP certification against a real OCP cluster is done separately by Red Hat
+  # via the preflight certification process — not in this CI pipeline.
   # Update this list when new OCP versions are released or reach end-of-life.
-  #   OCP 4.18 → k8s 1.31
-  #   OCP 4.19 → k8s 1.32
-  #   OCP 4.20 → k8s 1.33
+  #   OCP 4.18 → k8s 1.31   (Kind: kindest/node:v1.31.x)
+  #   OCP 4.19 → k8s 1.32   (Kind: kindest/node:v1.32.x)
+  #   OCP 4.20 → k8s 1.33   (Kind: kindest/node:v1.33.x)
   versions:
     runs-on: ubuntu-latest
     steps:
       - run: echo "setting versions"
     outputs:
-      # JSON encoded array of OCP-aligned k8s versions (newest first)
+      # JSON encoded array of upstream k8s versions matching supported OCP releases
       K8S_VERSIONS: '["1.33.1", "1.32.5", "1.31.9"]'
 
-  # Run the full OLM e2e suite against each OCP-aligned k8s version.
+  # Run the full OLM e2e suite (via Kind + upstream OLM) against each k8s version.
+  # This is NOT an OCP cluster test — it uses Kind with operator-sdk's OLM install.
   # Tests: CSV Succeeded, controller pod running, CRD accepted,
   #        VaultKMSConfig CR created, status.kmsPluginImage reconciled,
   #        status preserved after spec change.
